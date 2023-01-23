@@ -1,3 +1,4 @@
+wheel
 minio
 pyheif
 pillow
