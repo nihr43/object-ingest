@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: object-ingest
+spec:
+  ttlSecondsAfterFinished: 1800
+  template:
+    spec:
+      containers:
+      - name: object-ingest
+        image: images.local:5000/object-ingest
+        env:
+          - name: MINIO_ENDPOINT
+            value: "minio-public"
+          - name: BUCKET
+            value: "web-assets"
+          - name: ACCESS_KEY
+            value: "admin"
+          - name: SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-public
+                key: admin
+                optional: false
+      restartPolicy: Never
+  backoffLimit: 2
