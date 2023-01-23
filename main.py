@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import pyheif
+import argparse
 from PIL import Image
 from io import BytesIO
 from minio import Minio
@@ -29,6 +30,17 @@ def create_queue(client):
 
     return work_queue
 
+
+def unlock_all(client):
+    '''
+    unlock all objects in given bucket
+    '''
+    objects = client.list_objects(bucket, recursive=True)
+    for o in objects:
+        tags = client.get_object_tags(o.bucket_name, o.object_name)
+        if tags and 'lock' in tags:
+            log.info('unlocking ' + o.object_name)
+            client.delete_object_tags(o.bucket_name, o.object_name)
 
 def convert_heif(obj):
     '''
@@ -60,6 +72,14 @@ if __name__ == '__main__':
     bucket = os.getenv('BUCKET') or 'ingest'
 
     client = Minio(endpoint, access_key, secret_key, secure=False)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--unlock', action='store_true')
+    args = parser.parse_args()
+
+    if args.unlock:
+        unlock_all(client)
+        exit(0)
 
     work_queue = create_queue(client)
     log.info(str(len(work_queue)) + ' objects added to queue')
