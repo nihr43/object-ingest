@@ -10,7 +10,7 @@ from minio.commonconfig import Tags
 from concurrent.futures import ThreadPoolExecutor
 
 
-def create_queue(client):
+def create_queue(client, bucket, log):
     '''
     returns a list of actionable objects
     '''
@@ -31,7 +31,7 @@ def create_queue(client):
     return work_queue
 
 
-def unlock_all(client):
+def unlock_all(client, bucket, log):
     '''
     unlock all objects in given bucket
     '''
@@ -42,7 +42,8 @@ def unlock_all(client):
             log.info('unlocking ' + o.object_name)
             client.delete_object_tags(o.bucket_name, o.object_name)
 
-def convert_heif(obj):
+
+def convert_heif(obj, client, log):
     '''
     download object, convert to png
     return BytesIO containing png
@@ -60,7 +61,7 @@ def convert_heif(obj):
     image.save(membuf, format="png")
 
 
-def cpu_count():
+def cpu_count(log):
     cpu = os.cpu_count()
     if not cpu:
         log.info('os.cpu_count() returned None. defaulting to 4')
@@ -70,34 +71,36 @@ def cpu_count():
 
 
 if __name__ == '__main__':
+    def privileged_main():
+        logging.basicConfig(format='%(funcName)s(): %(message)s')
+        log = logging.getLogger(__name__)
+        log.setLevel(logging.INFO)
 
-    logging.basicConfig(format='%(funcName)s(): %(message)s')
-    log = logging.getLogger(__name__)
-    log.setLevel(logging.INFO)
+        endpoint = os.getenv('MINIO_ENDPOINT')
+        access_key = os.getenv('ACCESS_KEY')
+        secret_key = os.getenv('SECRET_KEY')
+        bucket = os.getenv('BUCKET') or 'ingest'
 
-    endpoint = os.getenv('MINIO_ENDPOINT')
-    access_key = os.getenv('ACCESS_KEY')
-    secret_key = os.getenv('SECRET_KEY')
-    bucket = os.getenv('BUCKET') or 'ingest'
+        client = Minio(endpoint, access_key, secret_key, secure=False)
 
-    client = Minio(endpoint, access_key, secret_key, secure=False)
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--unlock', action='store_true')
+        args = parser.parse_args()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--unlock', action='store_true')
-    args = parser.parse_args()
+        if args.unlock:
+            unlock_all(client, bucket, log)
+            exit(0)
 
-    if args.unlock:
-        unlock_all(client)
-        exit(0)
+        work_queue = create_queue(client, bucket, log)
+        log.info(str(len(work_queue)) + ' objects added to queue')
 
-    work_queue = create_queue(client)
-    log.info(str(len(work_queue)) + ' objects added to queue')
+        threads_out = []
+        with ThreadPoolExecutor(max_workers=cpu_count(log)) as work_pool:
+            for o in work_queue:
+                threads_out.append(work_pool.submit(convert_heif, o, client, log))
 
-    threads_out = []
-    with ThreadPoolExecutor(max_workers=cpu_count()) as work_pool:
-        for o in work_queue:
-            threads_out.append(work_pool.submit(convert_heif, o))
+        for i in threads_out:
+            if i.result():
+                log.info(i.result())
 
-    for i in threads_out:
-        if i.result():
-            log.info(i.result())
+    privileged_main()
