@@ -60,6 +60,15 @@ def convert_heif(obj):
     image.save(membuf, format="png")
 
 
+def cpu_count():
+    cpu = os.cpu_count()
+    if not cpu:
+        log.info('os.cpu_count() returned None. defaulting to 4')
+        return 4
+    else:
+        return cpu / 2
+
+
 if __name__ == '__main__':
 
     logging.basicConfig(format='%(funcName)s(): %(message)s')
@@ -85,7 +94,7 @@ if __name__ == '__main__':
     log.info(str(len(work_queue)) + ' objects added to queue')
 
     threads_out = []
-    with ThreadPoolExecutor(max_workers=6) as work_pool:
+    with ThreadPoolExecutor(max_workers=cpu_count()) as work_pool:
         for o in work_queue:
             threads_out.append(work_pool.submit(convert_heif, o))
 
