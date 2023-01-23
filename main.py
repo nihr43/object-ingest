@@ -111,7 +111,7 @@ if __name__ == '__main__':
         if args.noop:
             for o in work_queue:
                 log.info(o.object_name)
-                exit(0)
+            exit(0)
 
         processes = []
         with ThreadPoolExecutor(max_workers=cpu_count(log)) as work_pool:
