@@ -45,8 +45,7 @@ def unlock_all(client, bucket, log):
 
 def convert_heif(obj, client, log):
     '''
-    download object, convert to png
-    return BytesIO containing png
+    download object, convert to jpg, upload it
     '''
     try:
         r = client.get_object(obj.bucket_name, obj.object_name)
@@ -58,7 +57,20 @@ def convert_heif(obj, client, log):
     log.info('converting ' + obj.object_name)
     image = Image.frombytes(mode=heif.mode, size=heif.size, data=heif.data)
     membuf = BytesIO()
-    image.save(membuf, format="png")
+    image.save(membuf, format="jpeg", quality=75)
+    membuf.seek(0)
+
+    to_replace = re.compile(re.escape('heic'), re.IGNORECASE)
+    new_name = to_replace.sub('jpg', obj.object_name)
+
+    result = client.put_object(
+        obj.bucket_name, new_name, membuf, membuf.getbuffer().nbytes,
+    )
+    log.info("created {0} | etag: {1}".format(
+        result.object_name, result.etag))
+
+    client.remove_object(obj.bucket_name, obj.object_name)
+    log.info('removed original {0}'.format(obj.object_name))
 
 
 def cpu_count(log):
