@@ -7,6 +7,7 @@ from PIL import Image
 from io import BytesIO
 from minio import Minio
 from minio.commonconfig import Tags
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -97,6 +98,7 @@ if __name__ == '__main__':
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--unlock', action='store_true')
+        parser.add_argument('--noop', action='store_true')
         args = parser.parse_args()
 
         if args.unlock:
@@ -106,13 +108,20 @@ if __name__ == '__main__':
         work_queue = create_queue(client, bucket, log)
         log.info(str(len(work_queue)) + ' objects added to queue')
 
-        threads_out = []
+        if args.noop:
+            for o in work_queue:
+                log.info(o.object_name)
+                exit(0)
+
+        processes = []
         with ThreadPoolExecutor(max_workers=cpu_count(log)) as work_pool:
             for o in work_queue:
-                threads_out.append(work_pool.submit(convert_heif, o, client, log))
+                processes.append(work_pool.submit(convert_heif, o, client, log))
+            results = concurrent.futures.as_completed(processes)
 
-        for i in threads_out:
-            if i.result():
-                log.info(i.result())
+        # print traces if any
+        for p in processes:
+            if p.result():
+                log.info(p.result())
 
     privileged_main()
