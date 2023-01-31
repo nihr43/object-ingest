@@ -107,8 +107,7 @@ def job(obj, client, log):
 
     # if object is already locked, do nothing
     if is_locked(obj, client, log):
-        log.info('found locked object ' + obj.object_name)
-        return
+        return 'found locked object {}'.format(obj.object_name)
     else:
         lock_object(obj, client, log)
 
