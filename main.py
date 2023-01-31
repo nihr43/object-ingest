@@ -26,13 +26,12 @@ def unlock_all(client, bucket, log):
     '''
     objects = client.list_objects(bucket, recursive=True)
     for o in objects:
-        unlock_object(o, client, log)
+        unlock_object(o, client)
 
 
-def unlock_object(obj, client, log):
+def unlock_object(obj, client):
     tags = client.get_object_tags(obj.bucket_name, obj.object_name)
     if tags and 'lock' in tags:
-        log.info('unlocking ' + obj.object_name)
         client.delete_object_tags(obj.bucket_name, obj.object_name)
 
 
@@ -111,15 +110,20 @@ def job(obj, client, log):
     else:
         lock_object(obj, client, log)
 
+    changed = []
+
     if is_heif(obj, client, log):
         convert_heif(obj, client, log)
+        changed.append(1)
 
     if is_jpg_missing_content_type(obj, client):
         log.info('missing content-type')
+        changed.append(1)
 
-    unlock_object(obj, client, log)
+    unlock_object(obj, client)
 
-    return '{} complete'.format(obj.object_name)
+    if len(changed) > 0:
+        return '{} modified'.format(obj.object_name)
 
 
 if __name__ == '__main__':
@@ -145,7 +149,7 @@ if __name__ == '__main__':
             exit(0)
 
         work_queue = list(client.list_objects(bucket, recursive=True))
-        log.info(str(len(work_queue)) + ' objects added to queue')
+        log.info(str(len(work_queue)) + ' objects found')
 
         if args.noop:
             for o in work_queue:
