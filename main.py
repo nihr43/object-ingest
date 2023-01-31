@@ -7,29 +7,17 @@ from PIL import Image
 from io import BytesIO
 from minio import Minio
 from minio.commonconfig import Tags
-import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 
-def create_queue(client, bucket, log):
+def is_heif(obj, client, log):
     '''
-    returns a list of actionable objects
+    determine if object is a heif to be converted
     '''
-    work_queue = []
-    objects = client.list_objects(bucket, recursive=True)
-    for o in objects:
-        if re.search('\.heic$', o.object_name, re.IGNORECASE):
-            tags = client.get_object_tags(o.bucket_name, o.object_name)
-            # for brevity, we dont bother to check value of tag 'lock'.
-            if tags and 'lock' in tags:
-                log.info('found locked object ' + o.object_name)
-            else:
-                tag_to_set = Tags.new_object_tags()
-                tag_to_set['lock'] = 'true'
-                client.set_object_tags(o.bucket_name, o.object_name, tag_to_set)
-                work_queue.append(o)
-
-    return work_queue
+    if re.search('\.heic$', obj.object_name, re.IGNORECASE):
+        return True
+    else:
+        return False
 
 
 def unlock_all(client, bucket, log):
@@ -38,10 +26,14 @@ def unlock_all(client, bucket, log):
     '''
     objects = client.list_objects(bucket, recursive=True)
     for o in objects:
-        tags = client.get_object_tags(o.bucket_name, o.object_name)
-        if tags and 'lock' in tags:
-            log.info('unlocking ' + o.object_name)
-            client.delete_object_tags(o.bucket_name, o.object_name)
+        unlock_object(o, client, log)
+
+
+def unlock_object(obj, client, log):
+    tags = client.get_object_tags(obj.bucket_name, obj.object_name)
+    if tags and 'lock' in tags:
+        log.info('unlocking ' + obj.object_name)
+        client.delete_object_tags(obj.bucket_name, obj.object_name)
 
 
 def convert_heif(obj, client, log):
@@ -66,6 +58,7 @@ def convert_heif(obj, client, log):
 
     result = client.put_object(
         obj.bucket_name, new_name, membuf, membuf.getbuffer().nbytes,
+        'image/jpeg'
     )
     log.info("created {0} | etag: {1}".format(
         result.object_name, result.etag))
@@ -81,6 +74,53 @@ def cpu_count(log):
         return 4
     else:
         return cpu / 2
+
+
+def lock_object(obj, client, log):
+    # for brevity, we dont bother to check value of tag 'lock'.
+    tag_to_set = Tags.new_object_tags()
+    tag_to_set['lock'] = 'true'
+    client.set_object_tags(obj.bucket_name, obj.object_name, tag_to_set)
+
+
+def is_locked(obj, client, log):
+    tags = client.get_object_tags(obj.bucket_name, obj.object_name)
+    if tags and 'lock' in tags:
+        return True
+    else:
+        return False
+
+
+def is_jpg_missing_content_type(obj, client):
+    if re.search('\.jpg$', obj.object_name, re.IGNORECASE):
+        obj_stat = client.stat_object(obj.bucket_name, obj.object_name)
+        if obj_stat.content_type != 'image/jpeg':
+            return True
+        else:
+            return False
+
+
+def job(obj, client, log):
+    '''
+    an individual parallel task for each object
+    '''
+
+    # if object is already locked, do nothing
+    if is_locked(obj, client, log):
+        log.info('found locked object ' + obj.object_name)
+        return
+    else:
+        lock_object(obj, client, log)
+
+    if is_heif(obj, client, log):
+        convert_heif(obj, client, log)
+
+    if is_jpg_missing_content_type(obj, client):
+        log.info('missing content-type')
+
+    unlock_object(obj, client, log)
+
+    return '{} complete'.format(obj.object_name)
 
 
 if __name__ == '__main__':
@@ -105,7 +145,7 @@ if __name__ == '__main__':
             unlock_all(client, bucket, log)
             exit(0)
 
-        work_queue = create_queue(client, bucket, log)
+        work_queue = list(client.list_objects(bucket, recursive=True))
         log.info(str(len(work_queue)) + ' objects added to queue')
 
         if args.noop:
@@ -116,12 +156,11 @@ if __name__ == '__main__':
         processes = []
         with ThreadPoolExecutor(max_workers=cpu_count(log)) as work_pool:
             for o in work_queue:
-                processes.append(work_pool.submit(convert_heif, o, client, log))
-            results = concurrent.futures.as_completed(processes)
+                processes.append(work_pool.submit(job, o, client, log))
 
-        # print traces if any
-        for p in processes:
-            if p.result():
-                log.info(p.result())
+            # print traces if any
+            for p in processes:
+                if p.result():
+                    log.info(p.result())
 
     privileged_main()
