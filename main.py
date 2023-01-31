@@ -159,7 +159,8 @@ if __name__ == '__main__':
         processes = []
         with ThreadPoolExecutor(max_workers=cpu_count(log)) as work_pool:
             for o in work_queue:
-                processes.append(work_pool.submit(job, o, client, log))
+                mc = Minio(endpoint, access_key, secret_key, secure=False)
+                processes.append(work_pool.submit(job, o, mc, log))
 
             # print traces if any
             for p in processes:
