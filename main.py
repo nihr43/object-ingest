@@ -88,6 +88,30 @@ def add_content_type(obj, client, log):
         result.object_name, result.etag))
 
 
+def compress_jpg(obj, client, log):
+    '''
+    download object (ouch), and reupload with correct content-type tag.
+    there doesn't appear to be a straighforward way to modify these tags remotely.
+    '''
+    try:
+        r = client.get_object(obj.bucket_name, obj.object_name)
+        image = Image.open(BytesIO(r.data))
+    finally:
+        r.close()
+        r.release_conn()
+
+    membuf = BytesIO()
+    image.save(membuf, format="jpeg", quality=60)
+    membuf.seek(0)
+
+    result = client.put_object(
+        obj.bucket_name, obj.object_name, membuf, membuf.getbuffer().nbytes,
+        'image/jpeg'
+    )
+    log.info("created {0} | etag: {1}".format(
+        result.object_name, result.etag))
+
+
 def cpu_count(log):
     cpu = os.cpu_count()
     if not cpu:
@@ -121,6 +145,13 @@ def is_jpg_missing_content_type(obj, client):
             return False
 
 
+def is_jpg_too_large(obj):
+    if obj.size > 1000000:
+        return True
+    else:
+        return False
+
+
 def job(obj, client, log):
     '''
     an individual parallel task for each object
@@ -141,6 +172,11 @@ def job(obj, client, log):
     if is_jpg_missing_content_type(obj, client):
         log.info('missing content-type')
         add_content_type(obj, client, log)
+        changed.append(1)
+
+    if is_jpg_too_large(obj):
+        log.info('{} is too large'.format(obj.object_name))
+        compress_jpg(obj, client, log)
         changed.append(1)
 
     unlock_object(obj, client)
