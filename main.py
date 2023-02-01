@@ -66,6 +66,28 @@ def convert_heif(obj, client, log):
     log.info('removed original {0}'.format(obj.object_name))
 
 
+def add_content_type(obj, client, log):
+    '''
+    download object (ouch), and reupload with correct content-type tag.
+    there doesn't appear to be a straighforward way to modify these tags remotely.
+    '''
+    try:
+        r = client.get_object(obj.bucket_name, obj.object_name)
+        membuf = BytesIO(r.data)
+    finally:
+        r.close()
+        r.release_conn()
+
+    membuf.seek(0)
+
+    result = client.put_object(
+        obj.bucket_name, obj.object_name, membuf, obj.size,
+        'image/jpeg'
+    )
+    log.info("created {0} | etag: {1}".format(
+        result.object_name, result.etag))
+
+
 def cpu_count(log):
     cpu = os.cpu_count()
     if not cpu:
@@ -118,6 +140,7 @@ def job(obj, client, log):
 
     if is_jpg_missing_content_type(obj, client):
         log.info('missing content-type')
+        add_content_type(obj, client, log)
         changed.append(1)
 
     unlock_object(obj, client)
